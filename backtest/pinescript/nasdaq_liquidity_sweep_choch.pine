@@ -1,0 +1,373 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+//@version=5
+// =============================================================================
+//  Liquidity-Sweep / CHoCH Strategie — NASDAQ (validierte Edge-Konfiguration)
+// =============================================================================
+//  Portierung der Python-Backtest-Engine (final_recommendation.py, NASDAQ_PARAMS)
+//  auf Pine Script v5, damit die Strategie eigenstaendig in TradingView
+//  nachgebaut und gegengetestet werden kann.
+//
+//  BACKTEST-REFERENZWERTE (Python, 20 Monate echte Tick-Daten, HistData.com,
+//  Instrument-Proxy NQ1!/USATECH):
+//    Volle Historie:  n=113  Winrate=54.9%  Profit-Factor=1.68  Exp=+0.284R
+//    Out-of-Sample:   n=28   Winrate=46.4%  Profit-Factor=1.34  Exp=+0.164R
+//    In 5/5 unabhaengigen Zeitfenstern profitabel (Details: REPORT.md Abschnitt 7)
+//
+//  CHART-TIMEFRAME: 5 Minuten (M5) -- die Strategie ist fuer M5 kalibriert.
+//  INSTRUMENT: Nasdaq-100 Future/CFD (z.B. NQ1!, US100, USATECH, NAS100).
+//  Alle Level-/Toleranz-Parameter sind in Punkten (Index-Punkte), nicht Pips.
+//
+//  WICHTIGE, BEWUSSTE VEREINFACHUNGEN gegenueber dem Python-Backtest
+//  (Pine erfordert eine bar-fuer-bar/kausale Umsetzung statt Vektor-Suche;
+//  im Kern aber DIESELBE Logik):
+//   1. Equal-Highs/Lows: es wird nur das JEWEILS NEUESTE Cluster verfolgt
+//      (>= 2 Swings innerhalb Toleranz), nicht alle historischen Cluster
+//      gleichzeitig -- in der Praxis meist ohnehin das relevante Level.
+//   2. CHoCH-Kandidaten werden als Liste ab dem Sweep gesammelt und jeden
+//      Bar auf einen Bruch geprueft (= identische "fruehester Bruch"-Logik
+//      wie im Python-Code, nur kausal statt vektorisiert).
+//   3. Der Retest-Entry nutzt eine native Pine-Limit-Order zum CHoCH-Level
+//      (mit halber Retest-Toleranz als Entgegenkommen) statt eines manuellen
+//      Fensters -- das ist sogar realistischer als die Python-Simulation.
+//  Diese Unterschiede koennen zu leicht abweichenden Trades fuehren; das ist
+//  gewollt und ein guter Grund, hier selbst gegenzutesten.
+// =============================================================================
+
+strategy("Liquidity-Sweep/CHoCH – Nasdaq (Edge-Konfiguration)",
+          shorttitle = "LSC-Nasdaq",
+          overlay = true,
+          pyramiding = 0,
+          default_qty_type = strategy.fixed,
+          default_qty_value = 1,
+          initial_capital = 10000,
+          currency = currency.USD,
+          slippage = 3,   // in Ticks je Order-Seite -- an die Tick-Groesse des
+                            // gewaehlten Symbols anpassen, damit ca. 1.5 Punkte
+                            // Gesamtkosten pro Trade herauskommen (Annahme aus
+                            // dem Python-Backtest: ~1.5 Punkte Spread)
+          commission_type = strategy.commission.cash_per_contract,
+          commission_value = 0)
+
+// ---------------------------------------------------------------------------
+// 1) INPUTS — Standardwerte = validierte Nasdaq-Konfiguration
+// ---------------------------------------------------------------------------
+grpBias    = "1) HTF-Bias (H4)"
+grpLevels  = "2) Liquiditaetslevel"
+grpSweep   = "3) Sweep / Killzone"
+grpChoch   = "4) CHoCH-Bestaetigung"
+grpEntry   = "5)-7) Entry / SL / TP"
+grpRisk    = "Risiko & Ausfuehrung"
+
+emaLen         = input.int(20,  "EMA-Periode (H4)",                group = grpBias)
+atrLenH4       = input.int(14,  "ATR-Periode (H4)",                 group = grpBias)
+trendMinAtrMul = input.float(1.0, "Min. Trendstaerke (x ATR-H4)", step = 0.1, group = grpBias,
+                  tooltip = "H4-Close muss mindestens so viele ATR(H4) von der EMA20 entfernt sein, sonst kein Trade an diesem Tag.")
+
+asiaStartH = input.int(0, "Asia-Session Start (UTC-Stunde)", group = grpLevels)
+asiaEndH   = input.int(6, "Asia-Session Ende (UTC-Stunde)",  group = grpLevels)
+swingN     = input.int(3, "Swing-Fraktal Bars (je Seite)",   group = grpLevels)
+eqLookback = input.int(30, "Equal-Level: letzte N Swings",  group = grpLevels)
+eqTolPts   = input.float(3.0, "Equal-Level Toleranz (Punkte)", step = 0.5, group = grpLevels)
+
+killzoneMode = input.string("London", "Killzone", options = ["London", "NY", "Beide"], group = grpSweep,
+                  tooltip = "London 07-10 UTC / NY 12-15 UTC. Der Edge zeigte sich in allen drei Varianten robust.")
+sweepWickAtrMul = input.float(0.25, "Min. Sweep-Wick (x ATR-M5)", step = 0.05, group = grpSweep,
+                  tooltip = "Der Docht muss das Level um mind. so viel ATR(M5) ueberschiessen (0 = Filter aus).")
+atrLenM5   = input.int(14, "ATR-Periode (M5)", group = grpSweep)
+
+microN         = input.int(1, "Mikro-Fraktal Bars (CHoCH, je Seite)", group = grpChoch)
+chochWindowBar = input.int(24, "CHoCH-Fenster (Bars nach Sweep)",     group = grpChoch)
+dispAtrMul     = input.float(1.0, "Min. Displacement (x ATR-M5)", step = 0.1, group = grpChoch,
+                  tooltip = "Die CHoCH-bestaetigende Kerze muss einen Body von mind. so viel ATR(M5) haben.")
+
+retestWindowBar = input.int(24, "Retest-Fenster (Bars nach CHoCH)", group = grpEntry)
+retestTolPts    = input.float(2.0, "Retest-Toleranz (Punkte)", step = 0.5, group = grpEntry)
+slBufferPts     = input.float(2.0, "SL-Puffer hinter Sweep-Wick (Punkte)", step = 0.5, group = grpEntry)
+rr              = input.float(1.5, "Take-Profit Risk:Reward", step = 0.1, group = grpEntry)
+maxHoldBars     = input.int(48, "Zeit-Stop (Bars, 48 = 4h auf M5)", group = grpEntry)
+
+riskPct = input.float(1.0, "Risiko pro Trade (% Equity)", step = 0.1, group = grpRisk,
+              tooltip = "Positionsgroesse wird aus SL-Abstand und diesem Risiko-% berechnet. " +
+              "Ergebnis kann bei Futures eine Bruchzahl an Kontrakten sein -- je nach Broker " +
+              "ggf. mit math.round()/math.floor() auf ganze Kontrakte runden.")
+useDateFilter = input.bool(false, "Nur Backtest-Zeitraum begrenzen?", group = grpRisk)
+startDate = input.time(timestamp("2020-01-01 00:00 +0000"), "Start", group = grpRisk)
+endDate   = input.time(timestamp("2099-01-01 00:00 +0000"), "Ende",  group = grpRisk)
+inDateRange = not useDateFilter or (time >= startDate and time <= endDate)
+
+// ---------------------------------------------------------------------------
+// 2) HTF-BIAS (Schritt 1) — H4-EMA20, einmal pro UTC-Tag "eingefroren" auf
+//    Basis der letzten VOR Tagesbeginn abgeschlossenen H4-Kerze (kein Blick
+//    in die Zukunft, identisch zur Python-Logik in bias.py).
+// ---------------------------------------------------------------------------
+h4CloseLast   = request.security(syminfo.tickerid, "240", close[1],               lookahead = barmerge.lookahead_off)
+h4EmaLast     = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen)[1], lookahead = barmerge.lookahead_off)
+h4EmaPrev     = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen)[2], lookahead = barmerge.lookahead_off)
+h4AtrLast     = request.security(syminfo.tickerid, "240", ta.atr(atrLenH4)[1],      lookahead = barmerge.lookahead_off)
+
+var string dailyBias           = "neutral"
+var float  dailyTrendStrength  = 0.0
+
+isNewUtcDay = dayofmonth(time, "UTC") != dayofmonth(time[1], "UTC")
+
+if isNewUtcDay
+    emaRising  = h4EmaLast > h4EmaPrev
+    emaFalling = h4EmaLast < h4EmaPrev
+    if h4CloseLast > h4EmaLast and emaRising
+        dailyBias := "bullish"
+    else if h4CloseLast < h4EmaLast and emaFalling
+        dailyBias := "bearish"
+    else
+        dailyBias := "neutral"
+    dailyTrendStrength := (na(h4AtrLast) or h4AtrLast <= 0) ? 0.0 : math.abs(h4CloseLast - h4EmaLast) / h4AtrLast
+
+trendOk = dailyTrendStrength >= trendMinAtrMul
+
+// ---------------------------------------------------------------------------
+// 3) LIQUIDITAETSLEVEL (Schritt 2)
+// ---------------------------------------------------------------------------
+// -- Asia-Session High/Low --------------------------------------------------
+hourUtc = hour(time, "UTC")
+inAsiaSession = hourUtc >= asiaStartH and hourUtc < asiaEndH
+
+var float asiaHigh = na
+var float asiaLow  = na
+if isNewUtcDay
+    asiaHigh := na
+    asiaLow  := na
+if inAsiaSession
+    asiaHigh := na(asiaHigh) ? high : math.max(asiaHigh, high)
+    asiaLow  := na(asiaLow)  ? low  : math.min(asiaLow, low)
+asiaReady = not na(asiaHigh) and hourUtc >= asiaEndH
+
+// -- Swing-Hochs/-Tiefs (Fraktal, bestaetigt nach swingN Bars) --------------
+swingHigh = ta.pivothigh(high, swingN, swingN)
+swingLow  = ta.pivotlow(low,  swingN, swingN)
+
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+// -- Equal Highs/Lows (vereinfacht: nur das juengste Cluster) ---------------
+var array<float> swingHighBuf = array.new_float()
+var array<float> swingLowBuf  = array.new_float()
+var float eqHighLevel = na
+var float eqLowLevel  = na
+
+f_clusterAvg(arr, refPrice, tol) =>
+    float sum = refPrice
+    int   cnt = 1
+    n = array.size(arr)
+    if n > 1
+        for i = 0 to n - 2
+            v = array.get(arr, i)
+            if math.abs(v - refPrice) <= tol
+                sum := sum + v
+                cnt := cnt + 1
+    cnt >= 2 ? sum / cnt : float(na)
+
+if not na(swingHigh)
+    array.push(swingHighBuf, swingHigh)
+    if array.size(swingHighBuf) > eqLookback
+        array.remove(swingHighBuf, 0)
+    lvl = f_clusterAvg(swingHighBuf, swingHigh, eqTolPts)
+    if not na(lvl)
+        eqHighLevel := lvl
+
+if not na(swingLow)
+    array.push(swingLowBuf, swingLow)
+    if array.size(swingLowBuf) > eqLookback
+        array.remove(swingLowBuf, 0)
+    lvl2 = f_clusterAvg(swingLowBuf, swingLow, eqTolPts)
+    if not na(lvl2)
+        eqLowLevel := lvl2
+
+// ---------------------------------------------------------------------------
+// 4) KILLZONE
+// ---------------------------------------------------------------------------
+inLondonKz = hourUtc >= 7  and hourUtc < 10
+inNyKz     = hourUtc >= 12 and hourUtc < 15
+inKillzone = killzoneMode == "London" ? inLondonKz : killzoneMode == "NY" ? inNyKz : (inLondonKz or inNyKz)
+
+// ---------------------------------------------------------------------------
+// 5) ATR(M5) / Displacement-Kerzenkoerper — fuer Sweep- & CHoCH-Filter
+// ---------------------------------------------------------------------------
+atrM5   = ta.atr(atrLenM5)
+bodyM5  = math.abs(close - open)
+microHigh = ta.pivothigh(high, microN, microN)
+microLow  = ta.pivotlow(low,  microN, microN)
+
+// entspricht _threshold_ok() in strategy.py: Filter aus (mult<=0) oder
+// value >= mult*ref, mit na-Schutz waehrend der ersten ATR-Perioden.
+f_thresholdOk(value, ref, mult) =>
+    mult <= 0 or (not na(ref) and value >= mult * ref)
+
+// ---------------------------------------------------------------------------
+// 6) ZUSTANDSMASCHINE: Sweep -> CHoCH -> Retest-Entry -> SL/TP
+//    ("swept_today"-Bindung je Level-Typ, zurueckgesetzt an jedem neuen Tag)
+// ---------------------------------------------------------------------------
+var string state = "none"          // "none" | "await_choch" | "await_retest" | "in_trade"
+var string dir   = na              // "bullish" | "bearish"
+var int    sweepBar = na
+var float  wickExtreme = na
+var array<float> chochCandidates = array.new_float()
+var float  chochLevel = na
+var int    chochBar = na
+var float  slPrice = na
+var float  tpPrice = na
+var int    entryBarIdx = na
+
+var bool sweptAsia = false
+var bool sweptSwing = false
+var bool sweptEq   = false
+if isNewUtcDay
+    sweptAsia := false
+    sweptSwing := false
+    sweptEq := false
+
+noPendingOrPosition = state == "none" and strategy.position_size == 0
+
+// -- Schritt 3: Sweep suchen (nur wenn gerade nichts anderes laeuft) --------
+if noPendingOrPosition and inDateRange and inKillzone and trendOk and dailyBias != "neutral"
+    if dailyBias == "bullish"
+        // Sell-Side-Liquidity (Tiefs) sweepen -> long. Prioritaet: Asia-Low,
+        // dann letztes Swing-Low, dann juengstes Equal-Low (wie candidates[] in strategy.py).
+        if not sweptAsia and asiaReady and low < asiaLow and close > asiaLow
+            wext = asiaLow - low
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bullish"
+                sweepBar := bar_index
+                wickExtreme := low
+                array.clear(chochCandidates)
+            sweptAsia := true
+        else if not sweptSwing and not na(lastSwingLow) and low < lastSwingLow and close > lastSwingLow
+            wext = lastSwingLow - low
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bullish"
+                sweepBar := bar_index
+                wickExtreme := low
+                array.clear(chochCandidates)
+            sweptSwing := true
+        else if not sweptEq and not na(eqLowLevel) and low < eqLowLevel and close > eqLowLevel
+            wext = eqLowLevel - low
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bullish"
+                sweepBar := bar_index
+                wickExtreme := low
+                array.clear(chochCandidates)
+            sweptEq := true
+    else
+        // Buy-Side-Liquidity (Hochs) sweepen -> short.
+        if not sweptAsia and asiaReady and high > asiaHigh and close < asiaHigh
+            wext = high - asiaHigh
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bearish"
+                sweepBar := bar_index
+                wickExtreme := high
+                array.clear(chochCandidates)
+            sweptAsia := true
+        else if not sweptSwing and not na(lastSwingHigh) and high > lastSwingHigh and close < lastSwingHigh
+            wext = high - lastSwingHigh
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bearish"
+                sweepBar := bar_index
+                wickExtreme := high
+                array.clear(chochCandidates)
+            sweptSwing := true
+        else if not sweptEq and not na(eqHighLevel) and high > eqHighLevel and close < eqHighLevel
+            wext = high - eqHighLevel
+            if f_thresholdOk(wext, atrM5, sweepWickAtrMul)
+                state := "await_choch"
+                dir := "bearish"
+                sweepBar := bar_index
+                wickExtreme := high
+                array.clear(chochCandidates)
+            sweptEq := true
+
+// -- Schritt 4: CHoCH-Bestaetigung -------------------------------------------
+if state == "await_choch"
+    // neue Mikro-Swing-Kandidaten (entstanden NACH dem Sweep) sammeln
+    if dir == "bullish" and not na(microHigh) and (bar_index - microN) > sweepBar
+        array.push(chochCandidates, microHigh)
+    if dir == "bearish" and not na(microLow) and (bar_index - microN) > sweepBar
+        array.push(chochCandidates, microLow)
+
+    // Bruch eines beliebigen bisher gesammelten Kandidaten pruefen
+    // (= "fruehester Bruch ueber alle Kandidaten" wie in strategy.py)
+    brokenLevel = float(na)
+    if array.size(chochCandidates) > 0
+        for k = 0 to array.size(chochCandidates) - 1
+            lvl = array.get(chochCandidates, k)
+            broke = dir == "bullish" ? close > lvl : close < lvl
+            if broke and na(brokenLevel)
+                brokenLevel := lvl
+
+    dispOk = f_thresholdOk(bodyM5, atrM5, dispAtrMul)
+    if not na(brokenLevel) and dispOk
+        // Entry-Limit-Order zum CHoCH-Level (mit halber Retest-Toleranz
+        // entgegenkommend -- native Pine-Limit-Order statt manuellem
+        // Retest-Fenster-Scan).
+        float candEntry = dir == "bullish" ? brokenLevel + retestTolPts / 2 : brokenLevel - retestTolPts / 2
+        float candSl    = dir == "bullish" ? wickExtreme - slBufferPts      : wickExtreme + slBufferPts
+        float candRisk  = dir == "bullish" ? candEntry - candSl            : candSl - candEntry
+        if candRisk > 0
+            // gueltiges Setup (Risk>0, entspricht "risk<=0: return None" in strategy.py)
+            chochLevel := brokenLevel
+            chochBar := bar_index
+            slPrice := candSl
+            tpPrice := dir == "bullish" ? candEntry + rr * candRisk : candEntry - rr * candRisk
+            qty = (strategy.equity * riskPct / 100) / (candRisk * syminfo.pointvalue)
+            state := "await_retest"
+            if dir == "bullish"
+                strategy.entry("Long", strategy.long, qty = qty, limit = candEntry)
+            else
+                strategy.entry("Short", strategy.short, qty = qty, limit = candEntry)
+        else
+            // ungueltiges Setup (SL wuerde auf der falschen Seite liegen) -> verwerfen
+            state := "none"
+            array.clear(chochCandidates)
+    else if bar_index - sweepBar > chochWindowBar
+        // Zeitfenster fuer CHoCH abgelaufen -> Setup verwerfen
+        state := "none"
+        array.clear(chochCandidates)
+
+// -- Schritt 5: Retest/Entry -- Order canceln, falls nicht binnen Fenster gefuellt
+if state == "await_retest"
+    if strategy.position_size != 0
+        entryBarIdx := bar_index
+        state := "in_trade"
+    else if bar_index - chochBar > retestWindowBar
+        strategy.cancel("Long")
+        strategy.cancel("Short")
+        state := "none"
+
+// -- Schritt 6/7: SL/TP (Bracket) + Zeit-Stop --------------------------------
+if state == "in_trade"
+    strategy.exit("Exit-Long",  from_entry = "Long",  stop = slPrice, limit = tpPrice)
+    strategy.exit("Exit-Short", from_entry = "Short", stop = slPrice, limit = tpPrice)
+    if bar_index - entryBarIdx >= maxHoldBars
+        strategy.close_all(comment = "Zeit-Stop")
+    if strategy.position_size == 0
+        state := "none"
+
+// ---------------------------------------------------------------------------
+// 7) PLOTS — zum Nachvollziehen der Level auf dem Chart
+// ---------------------------------------------------------------------------
+plot(asiaReady ? asiaHigh : na, "Asia-High", color = color.gray, style = plot.style_linebr)
+plot(asiaReady ? asiaLow  : na, "Asia-Low",  color = color.gray, style = plot.style_linebr)
+plot(lastSwingHigh, "Letztes Swing-High", color = color.orange, style = plot.style_circles)
+plot(lastSwingLow,  "Letztes Swing-Low",  color = color.orange, style = plot.style_circles)
+plot(state != "none" ? chochLevel : na, "CHoCH-Level", color = color.aqua, style = plot.style_linebr, linewidth = 2)
+plot(state == "in_trade" ? slPrice : na, "SL", color = color.red,   style = plot.style_linebr, linewidth = 2)
+plot(state == "in_trade" ? tpPrice : na, "TP", color = color.green, style = plot.style_linebr, linewidth = 2)
+
+bgcolor(dailyBias == "bullish" ? color.new(color.green, 92) : dailyBias == "bearish" ? color.new(color.red, 92) : na,
+         title = "HTF-Bias")

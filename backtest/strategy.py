@@ -305,6 +305,16 @@ def run_strategy(df: pd.DataFrame, pre: dict, params: dict, pip_size: float, spr
                             trade = _simulate_trade(df, entry_pos, choch_level, sl, tp, direction,
                                                       params["max_hold_bars"], spread)
                             trade["instrument_pos_entry"] = entry_pos
+                            # Zusatzinfos rein fuer Nachvollziehbarkeit/Visualisierung eines
+                            # einzelnen Trades -- werden von metrics.py ignoriert.
+                            a = asia_levels.get(day)
+                            trade["debug"] = {
+                                "bias": bias, "sweep_pos": i, "sweep_time": idx[i],
+                                "sweep_level": level_price, "sweep_level_id": lid,
+                                "wick_extreme": wick_extreme, "choch_confirm_pos": confirm_pos,
+                                "choch_confirm_time": idx[confirm_pos], "choch_level": choch_level,
+                                "asia_high": a["high"] if a else None, "asia_low": a["low"] if a else None,
+                            }
                             trades.append(trade)
                             i = trade["exit_pos"]
                             continue
