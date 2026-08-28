@@ -1,0 +1,248 @@
+{
+  "nasdaq_recommended": {
+    "params": {
+      "swing_n": 3,
+      "micro_n": 1,
+      "eq_tol_pips": 3,
+      "eq_lookback": 30,
+      "retest_tol_pips": 2,
+      "max_hold_bars": 48,
+      "min_rr": 1.0,
+      "asia_start": 0,
+      "asia_end": 6,
+      "killzone_mode": "london",
+      "choch_window": 24,
+      "retest_window": 24,
+      "sl_buffer_pips": 2,
+      "tp_mode": "fixed",
+      "rr": 1.5,
+      "trend_strength_atr_mult": 1.0,
+      "sweep_min_wick_atr_mult": 0.25,
+      "displacement_atr_mult": 1.0,
+      "volume_mult": 0.0
+    },
+    "full_history": {
+      "n_trades": 113,
+      "win_rate": 0.5486725663716814,
+      "profit_factor": 1.6756826992433933,
+      "expectancy_R": 0.28394684155395244,
+      "max_drawdown_R": 5.842278203723762,
+      "total_R": 32.08599309559663
+    },
+    "train": {
+      "n_trades": 85,
+      "win_rate": 0.5764705882352941,
+      "profit_factor": 1.8072411879890622,
+      "expectancy_R": 0.3235817906045416,
+      "max_drawdown_R": 5.842278203723762,
+      "total_R": 27.504452201386037
+    },
+    "test_oos": {
+      "n_trades": 28,
+      "win_rate": 0.4642857142857143,
+      "profit_factor": 1.3415335468992755,
+      "expectancy_R": 0.16362646050752122,
+      "max_drawdown_R": 2.414614569507501,
+      "total_R": 4.581540894210594
+    },
+    "chunks": [
+      {
+        "chunk": 1,
+        "start": "2025-01-01",
+        "end": "2025-05-01",
+        "n_trades": 20,
+        "win_rate": 0.7,
+        "profit_factor": 3.0082842180576,
+        "expectancy_R": 0.6024852654172802,
+        "total_R": 12.049705308345604
+      },
+      {
+        "chunk": 2,
+        "start": "2025-05-01",
+        "end": "2025-08-28",
+        "n_trades": 25,
+        "win_rate": 0.6,
+        "profit_factor": 2.0704863849938766,
+        "expectancy_R": 0.383065378192647,
+        "total_R": 9.576634454816176
+      },
+      {
+        "chunk": 3,
+        "start": "2025-08-28",
+        "end": "2025-12-26",
+        "n_trades": 28,
+        "win_rate": 0.5357142857142857,
+        "profit_factor": 1.5040266195728296,
+        "expectancy_R": 0.23401235908738507,
+        "total_R": 6.552346054446782
+      },
+      {
+        "chunk": 4,
+        "start": "2025-12-26",
+        "end": "2026-04-27",
+        "n_trades": 22,
+        "win_rate": 0.5,
+        "profit_factor": 1.275159010726727,
+        "expectancy_R": 0.12664947032896975,
+        "total_R": 2.7862883472373343
+      },
+      {
+        "chunk": 5,
+        "start": "2026-04-27",
+        "end": "2026-08-21",
+        "n_trades": 17,
+        "win_rate": 0.47058823529411764,
+        "profit_factor": 1.47264181202209,
+        "expectancy_R": 0.20614452150455384,
+        "total_R": 3.5044568655774153
+      }
+    ],
+    "all_chunks_profitable": "True"
+  },
+  "gold_core_no_edge": {
+    "params": {
+      "swing_n": 3,
+      "micro_n": 1,
+      "eq_tol_pips": 3,
+      "eq_lookback": 30,
+      "retest_tol_pips": 2,
+      "max_hold_bars": 48,
+      "min_rr": 1.0,
+      "asia_start": 0,
+      "asia_end": 6,
+      "killzone_mode": "ny",
+      "choch_window": 12,
+      "retest_window": 24,
+      "sl_buffer_pips": 2,
+      "tp_mode": "fixed",
+      "rr": 1.5,
+      "trend_strength_atr_mult": 0.0,
+      "sweep_min_wick_atr_mult": 0.0,
+      "displacement_atr_mult": 0.0,
+      "volume_mult": 0.0
+    },
+    "full_history": {
+      "n_trades": 303,
+      "win_rate": 0.44554455445544555,
+      "profit_factor": 1.035966081427015,
+      "expectancy_R": 0.018167332660265326,
+      "max_drawdown_R": 14.591571669193332,
+      "total_R": 5.5047017960603934
+    },
+    "train": {
+      "n_trades": 217,
+      "win_rate": 0.47465437788018433,
+      "profit_factor": 1.1118034595130972,
+      "expectancy_R": 0.053740733562387635,
+      "max_drawdown_R": 12.865724008035077,
+      "total_R": 11.661739183038117
+    },
+    "test_oos": {
+      "n_trades": 85,
+      "win_rate": 0.36470588235294116,
+      "profit_factor": 0.8439784821586487,
+      "expectancy_R": -0.08947719708366512,
+      "max_drawdown_R": 14.183970343426214,
+      "total_R": -7.6055617521115355
+    }
+  },
+  "gold_strict_filter_unconfirmed": {
+    "params": {
+      "swing_n": 3,
+      "micro_n": 1,
+      "eq_tol_pips": 3,
+      "eq_lookback": 30,
+      "retest_tol_pips": 2,
+      "max_hold_bars": 48,
+      "min_rr": 1.0,
+      "asia_start": 0,
+      "asia_end": 6,
+      "killzone_mode": "ny",
+      "choch_window": 12,
+      "retest_window": 24,
+      "sl_buffer_pips": 2,
+      "tp_mode": "fixed",
+      "rr": 1.5,
+      "trend_strength_atr_mult": 1.2,
+      "sweep_min_wick_atr_mult": 0.1,
+      "displacement_atr_mult": 1.0,
+      "volume_mult": 0.0
+    },
+    "full_history": {
+      "n_trades": 42,
+      "win_rate": 0.5476190476190477,
+      "profit_factor": 1.6495792613997209,
+      "expectancy_R": 0.2616759528264465,
+      "max_drawdown_R": 6.559799335037873,
+      "total_R": 10.990390018710753
+    },
+    "train": {
+      "n_trades": 33,
+      "win_rate": 0.6060606060606061,
+      "profit_factor": 2.077556214555542,
+      "expectancy_R": 0.37938103947532476,
+      "max_drawdown_R": 3.580849478390464,
+      "total_R": 12.519574302685717
+    },
+    "test_oos": {
+      "n_trades": 9,
+      "win_rate": 0.3333333333333333,
+      "profit_factor": 0.7115157951254231,
+      "expectancy_R": -0.169909364886107,
+      "max_drawdown_R": 2.978949856647408,
+      "total_R": -1.529184283974963
+    },
+    "chunks": [
+      {
+        "chunk": 1,
+        "start": "2025-01-01",
+        "end": "2025-05-01",
+        "n_trades": 6,
+        "win_rate": 0.5,
+        "profit_factor": 1.324128710592216,
+        "expectancy_R": 0.16206435529610794,
+        "total_R": 0.9723861317766476
+      },
+      {
+        "chunk": 2,
+        "start": "2025-05-01",
+        "end": "2025-08-27",
+        "n_trades": 5,
+        "win_rate": 0.8,
+        "profit_factor": 142.37171575815634,
+        "expectancy_R": 1.0642137787732977,
+        "total_R": 5.321068893866489
+      },
+      {
+        "chunk": 3,
+        "start": "2025-08-27",
+        "end": "2025-12-24",
+        "n_trades": 12,
+        "win_rate": 0.6666666666666666,
+        "profit_factor": 2.268033713283941,
+        "expectancy_R": 0.4226779044279805,
+        "total_R": 5.072134853135766
+      },
+      {
+        "chunk": 4,
+        "start": "2025-12-24",
+        "end": "2026-04-27",
+        "n_trades": 7,
+        "win_rate": 0.42857142857142855,
+        "profit_factor": 0.8208150007404298,
+        "expectancy_R": -0.09166207301914683,
+        "total_R": -0.6416345111340278
+      },
+      {
+        "chunk": 5,
+        "start": "2026-04-27",
+        "end": "2026-08-21",
+        "n_trades": 9,
+        "win_rate": 0.3333333333333333,
+        "profit_factor": 0.7115157951254231,
+        "expectancy_R": -0.169909364886107,
+        "total_R": -1.529184283974963
+      }
+    ]
+  }
+}
