@@ -144,13 +144,93 @@ echten, aus der Marktstruktur kommenden Edge. Realistisch zu erwartende
 Winrate bei diesem Regelwerk: **35-45 %**, mit einem Erwartungswert nahe
 Null bis leicht negativ nach Kosten.
 
-**Ansatzpunkte fuer weitere Verbesserung** (nicht mehr in diesem Backtest
-umgesetzt, aber naheliegend):
-- Laengere/hochwertigere Tick-Historie (>1 Jahr) fuer belastbarere Statistik.
-- Zusaetzlicher Qualitaetsfilter fuer den Sweep (z. B. Mindest-Wickgroesse
-  relativ zum ATR, Volumen-Bestaetigung).
-- CHoCH-Bestaetigung auf einer *festen* Struktur (z. B. immer der
-  unmittelbar vorausgehende signifikante Swing) statt des fruehesten
-  Mikro-Swing-Bruchs, um Fehlsignale in Choppy-Phasen zu reduzieren.
-- Handel nur an Tagen mit klar definiertem HTF-Trend (z. B. Mindestabstand
-  Close zu EMA), um "neutrale"/Range-Phasen konsequenter auszufiltern.
+**Ansatzpunkte fuer weitere Verbesserung**, die im zweiten Anlauf (Abschnitt 6)
+tatsaechlich umgesetzt und getestet wurden:
+- Laengere/hochwertigere Tick-Historie (>1 Jahr) fuer belastbarere Statistik
+  — **nicht umgesetzt**, mit der 5m-Yahoo-Quelle nicht verfuegbar.
+- Zusaetzlicher Qualitaetsfilter fuer den Sweep (Mindest-Wickgroesse relativ
+  zum ATR, Volumen-Bestaetigung) — **umgesetzt**, siehe Abschnitt 6.
+- CHoCH-Bestaetigung mit Mindest-"Displacement" (Body relativ zum ATR)
+  statt jedes beliebigen Mikro-Swing-Bruchs — **umgesetzt**, siehe Abschnitt 6.
+- Handel nur an Tagen mit klar definiertem HTF-Trend (Mindestabstand Close
+  zu EMA relativ zum ATR) — **umgesetzt**, siehe Abschnitt 6.
+
+## 6. Zweiter Anlauf: gezielte Edge-Suche mit Qualitaetsfiltern
+
+Auf expliziten Wunsch wurde ein zweiter, fokussierter Optimierungslauf **nur
+auf Gold und Nasdaq** durchgefuehrt, mit dem Ziel, einen echten Edge zu
+erzeugen. Dazu wurden vier zusaetzliche, ATR-/Volumen-normierte
+Qualitaetsfilter eingebaut (`strategy.py`, standardmaessig deaktiviert):
+
+- **Trendstaerke-Filter**: HTF-Bias nur gueltig, wenn H4-Close mindestens
+  `X * ATR(H4)` von der EMA(20) entfernt ist (kein Trading in Range-Tagen).
+- **Sweep-Qualitaetsfilter**: der Wick muss mindestens `X * ATR(M5)` ueber
+  das Level hinausreichen (kein knapper/zufaelliger "Sweep").
+- **Displacement-Filter**: die CHoCH-bestaetigende Kerze muss einen Body von
+  mindestens `X * ATR(M5)` haben (echte Wucht statt Zufalls-Tick-Bruch).
+- **Volumen-Filter**: Sweep-Bar-Volumen mindestens `X *` rollierender
+  Median(20) (echte Teilnahme statt Rauschen).
+
+Optimiert wurde **pro Instrument getrennt** (Gold und Nasdaq verhalten sich
+sehr unterschiedlich) per Koordinatenabstieg: zuerst die Kern-Parameter aus
+Abschnitt 2.3, danach bei fixierten Kern-Parametern die vier neuen Filter.
+
+### 6.1 Erster Versuch: 4-Fold-Walk-Forward pro Instrument (verworfen)
+
+Die gleiche Walk-Forward-Logik wie in Abschnitt 3.1, aber jetzt pro
+Instrument statt gepoolt, brach die ohnehin knappe Stichprobe weiter auf 4
+Folds herunter. Ergebnis: Trainings- und Test-Teilmengen pro Runde enthielten
+teils nur **3-14 Trades** — zu wenig fuer eine belastbare Parameterwahl oder
+Validierung (z. B. Gold Runde 3: Test n=3, WR=0%). Das gepoolte Ergebnis
+(WR 29.7%, PF 0.74) ist reines Rauschen und wird **nicht** als Befund
+gewertet (Rohdaten trotzdem archiviert in `optimize_v2_results.json`).
+
+### 6.2 Zweiter Versuch: einzelner 70/30-Split pro Instrument
+
+Um genug Trades je Seite zu behalten (~50 Handelstage Training, ~22 Tage
+Test), wurde stattdessen ein einzelner Zeit-Split je Instrument verwendet,
+mit einer Mindest-Trade-Zahl (20) bei der Parameterauswahl.
+
+| Instrument | Train n (Kern) | Train n (Kern+Filter) | gewaehlte Filter | Test n | Test WR | Test PF | Test Exp. |
+|---|---|---|---|---|---|---|---|
+| XAUUSD | 25 (WR 36.0%, PF 0.69) | 21 (WR 47.6%, PF 1.12) | wick=0.1, displacement=0.3 | 13 | 38.5 % | **1.11** | **+0.068 R** |
+| NASDAQ | 34 (WR 61.8%, PF 2.42) | 32 (WR 65.6%, PF 2.94) | displacement=0.6, volume=0.8 | 17 | 35.3 % | 0.69 | -0.175 R |
+| **Kombiniert** | | | | **30** | **36.7 %** | **0.88** | **-0.070 R** |
+
+![Equity-Kurven v3](equity_curves_v3.png)
+
+**Ehrliche Einordnung dieses Ergebnisses:**
+
+- Bei **Gold** verbessern die Filter das Out-of-Sample-Ergebnis leicht
+  gegenueber der ungefilterten Kern-Strategie (PF 1.04→1.11, Expectancy
+  +0.027→+0.068 R). Das ist ein **schwaches, aber tendenziell positives**
+  Signal — bei nur **13 Test-Trades** statistisch jedoch nicht von Zufall
+  unterscheidbar (die Trefferquote muesste bei so kleiner Stichprobe um
+  mehrere zehn Prozentpunkte schwanken, ohne dass das auffallen wuerde).
+- Bei **Nasdaq** verschlechtern dieselben Filter das Out-of-Sample-Ergebnis
+  (PF 0.86→0.69) trotz eines sehr ueberzeugenden Trainings-Fits (WR 65.6%,
+  PF 2.94) — ein Lehrbuchbeispiel fuer Overfitting: die Filter-Kombination
+  passt zur Trainingsperiode, nicht zum Marktverhalten generell.
+- **Kombiniert bleibt das Ergebnis unter Profit-Factor 1** (0.88):  auch mit
+  den zusaetzlichen ICT-ueblichen Qualitaetsfiltern entsteht **kein robuster,
+  reproduzierbarer Edge** auf Basis der verfuegbaren ~72 Tage 5-Minuten-Daten.
+
+### 6.3 Fazit des zweiten Anlaufs
+
+Es wurde bewusst und explizit nach einem Edge gesucht (drei verschiedene
+Validierungsmethoden, vier zusaetzliche Qualitaetsfilter, getrennte
+Optimierung pro Instrument) — mit dem Ergebnis, dass sich **keiner
+einstellt, der einer Out-of-Sample-Pruefung standhaelt**. Der einzige
+Lichtblick (Gold, Kern+Filter, PF 1.11) ist mit 13 Trades statistisch nicht
+belastbar und sollte **nicht** als bestaetigter Edge missverstanden werden,
+sondern allenfalls als Ausgangspunkt fuer eine erneute Pruefung, sobald mehr
+Historie verfuegbar ist.
+
+**Ehrliche Schlussfolgerung**: Mit den hier verfuegbaren Daten (ca. 72 Tage,
+5-Minuten-Aufloesung, Futures-Proxys statt echter Spot-/Tick-Daten) laesst
+sich fuer diese Strategie auf Gold und Nasdaq **kein statistisch
+abgesicherter Edge nachweisen** — weder in der urspruenglichen noch in der
+gefilterten Version. Um die Frage serioes zu beantworten, braeuchte es
+deutlich mehr Historie (idealerweise >1 Jahr Tick- oder M1-Daten je
+Instrument), damit Parameterwahl und Validierung auf Hunderten statt
+Dutzenden Trades beruhen koennen.

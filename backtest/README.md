@@ -19,10 +19,14 @@ verfuegbar).
 ## Ergebnis in Kuerze
 
 **Die Strategie zeigt in diesem Zeitraum/auf diesen Instrumenten keinen
-robusten, profitablen Edge.** Winrate liegt je nach Parametrisierung bei
-~32-45%, in der Walk-Forward-Out-of-Sample-Auswertung bei **37.5%** mit
-**Profit-Factor 0.91** (leicht negativ). Details und Methodik: siehe
-[`REPORT.md`](REPORT.md).
+robusten, profitablen Edge** — auch nicht nach einem gezielten zweiten
+Optimierungslauf mit zusaetzlichen ATR-/Volumen-basierten Qualitaetsfiltern
+(Trendstaerke, Sweep-Groesse, CHoCH-Displacement, Volumen), separat fuer
+Gold und Nasdaq optimiert. Winrate liegt je nach Parametrisierung bei
+~32-48%, Out-of-Sample durchgaengig mit Profit-Factor <= 1.1. Einziger
+schwacher Lichtblick: Gold mit Filtern erreicht PF 1.11 auf nur 13
+Out-of-Sample-Trades — statistisch nicht belastbar. Details und Methodik:
+siehe [`REPORT.md`](REPORT.md) (Abschnitt 6 fuer den zweiten Anlauf).
 
 ## Struktur
 
@@ -38,9 +42,13 @@ backtest/
   optimize.py            # Grid-Search mit einfachem 70/30 Train/Test-Split
   walk_forward.py        # Robustere Analyse: rollierende Walk-Forward-Validierung
   baseline_check.py      # Kontroll-Lauf mit fest vorgegebenen (nicht optimierten) Parametern
-  make_charts.py         # Equity-Kurven als PNG
-  data/*.csv              # Rohdaten (bereits geladen, fuer Reproduzierbarkeit)
-  REPORT.md               # Ausfuehrlicher Ergebnisbericht
+  indicators.py           # ATR & rollierender Volumen-Median (fuer Qualitaetsfilter)
+  optimize_v2.py           # 2. Anlauf: 4-Fold-Walk-Forward + Filter pro Instrument (verworfen, zu wenig Trades/Fold)
+  optimize_v3.py           # 2. Anlauf: einzelner 70/30-Split + Filter pro Instrument (finales Ergebnis)
+  make_charts.py           # Equity-Kurven (1. Anlauf) als PNG
+  make_charts_v3.py         # Equity-Kurven (2. Anlauf, Gold/Nasdaq einzeln) als PNG
+  data/*.csv                # Rohdaten (bereits geladen, fuer Reproduzierbarkeit)
+  REPORT.md                 # Ausfuehrlicher Ergebnisbericht (inkl. Abschnitt 6: Filter-Anlauf)
 ```
 
 ## Reproduzieren
@@ -52,7 +60,9 @@ python fetch_data.py        # optional: Daten neu laden
 python optimize.py          # einfacher Train/Test-Split + Grid-Search
 python walk_forward.py       # rollierende Walk-Forward-Validierung (empfohlen)
 python baseline_check.py     # Kontroll-Lauf ohne Parameter-Fit
-python make_charts.py        # Equity-Kurven-PNG erzeugen
+python make_charts.py        # Equity-Kurven-PNG erzeugen (1. Anlauf)
+python optimize_v3.py         # 2. Anlauf: Qualitaetsfilter, 70/30-Split pro Instrument
+python make_charts_v3.py      # Equity-Kurven-PNG erzeugen (2. Anlauf)
 ```
 
 ## Wichtige methodische Entscheidungen
