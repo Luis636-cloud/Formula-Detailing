@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 backtest/data/_dukascopy_progress/
+backtest/data/*_dukascopy.csv
