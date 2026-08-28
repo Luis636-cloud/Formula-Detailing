@@ -1,0 +1,17 @@
+{
+  "swing_n": 3,
+  "micro_n": 1,
+  "eq_tol_pips": 3,
+  "eq_lookback": 30,
+  "retest_tol_pips": 2,
+  "max_hold_bars": 48,
+  "min_rr": 1.0,
+  "asia_start": 0,
+  "asia_end": 6,
+  "killzone_mode": "london",
+  "choch_window": 24,
+  "retest_window": 12,
+  "sl_buffer_pips": 2,
+  "tp_mode": "next_level",
+  "rr": 1.5
+}
