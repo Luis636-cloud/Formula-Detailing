@@ -36,9 +36,14 @@ from walk_forward import make_folds, N_FOLDS
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 FILTER_GRID = {
-    "trend_strength_atr_mult": [0.0, 0.3, 0.6, 1.0],
+    # Bereich nach oben erweitert (1.2/1.5): eine Sensitivitaetsanalyse auf
+    # der vollen Historie zeigte einen glatten, monotonen Zusammenhang
+    # zwischen staerkerer Filterung und besserer Trefferquote/PF bis an
+    # den urspruenglichen Rand des Grids (1.0) heran -- das urspruengliche
+    # Grid war also zu eng, um das Optimum zu erfassen.
+    "trend_strength_atr_mult": [0.0, 0.3, 0.6, 1.0, 1.2, 1.5],
     "sweep_min_wick_atr_mult": [0.0, 0.1, 0.25, 0.5],
-    "displacement_atr_mult": [0.0, 0.3, 0.6, 1.0],
+    "displacement_atr_mult": [0.0, 0.3, 0.6, 1.0, 1.2],
     "volume_mult": [0.0, 0.8, 1.2],
 }
 
