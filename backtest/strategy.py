@@ -18,6 +18,25 @@ KILLZONE_PRESETS = {
 }
 
 
+def _split_by_type(swings):
+    """Trennt eine nach confirmed_pos sortierte Swing-Liste in High-/Low-
+    Teillisten (bleiben dabei selbst nach pos/confirmed_pos sortiert) und
+    liefert dazu deren confirmed_pos- sowie pos-Arrays fuer bisect.
+
+    Performance: das ist die Grundlage dafuer, dass wir bei jedem Bar nur
+    noch O(log n) statt O(n) ueber die (bei Monaten an 5m-Daten schnell
+    zehntausende Eintraege lange) Swing-Historie suchen muessen.
+    """
+    highs = [s for s in swings if s["type"] == "high"]
+    lows = [s for s in swings if s["type"] == "low"]
+    return {
+        "high": {"items": highs, "conf": [s["confirmed_pos"] for s in highs],
+                  "pos": [s["pos"] for s in highs]},
+        "low": {"items": lows, "conf": [s["confirmed_pos"] for s in lows],
+                 "pos": [s["pos"] for s in lows]},
+    }
+
+
 def precompute(df: pd.DataFrame, swing_n: int, micro_n: int,
                 asia_start: int, asia_end: int, ema_period: int = 20):
     h4 = resample_h4(df)
@@ -26,20 +45,22 @@ def precompute(df: pd.DataFrame, swing_n: int, micro_n: int,
     swings = find_fractal_swings(df, swing_n)
     micro_swings = find_fractal_swings(df, micro_n)
     asia_levels = asia_session_levels(df, asia_start, asia_end)
-    confirmed_pos_arr = [s["confirmed_pos"] for s in swings]
     atr_m5 = atr_series(df, 14).values
     vol_median = rolling_median_volume(df, 20).values
     body = (df["close"] - df["open"]).abs().values
     return {
         "bias_map": bias_map,
         "trend_strength_map": trend_strength_map,
-        "swings": swings,
-        "micro_swings": micro_swings,
+        "swings_by_type": _split_by_type(swings),
+        "micro_by_type": _split_by_type(micro_swings),
         "asia_levels": asia_levels,
-        "confirmed_pos_arr": confirmed_pos_arr,
         "atr_m5": atr_m5,
         "vol_median": vol_median,
         "body": body,
+        # fuer den Haupt-Loop vorab aus dem DatetimeIndex extrahiert, um
+        # teures Timestamp-Boxing (df.index[i].hour/.date()) pro Bar zu vermeiden
+        "hours": df.index.hour.values,
+        "dates": df.index.date,
     }
 
 
@@ -52,19 +73,23 @@ def _threshold_ok(value, ref, mult):
     return value >= mult * ref
 
 
-def _find_choch(df_close, body, atr_m5, micro_swings, sweep_pos, direction, choch_window,
+def _find_choch(df_close, body, atr_m5, micro_by_type, sweep_pos, direction, choch_window,
                   displacement_atr_mult, n):
     """CHoCH = Bruch eines Mikro-Swings nach dem Sweep. Optional muss die
     bestaetigende Kerze eine Mindest-'Displacement'-Groesse (Body relativ zu
-    ATR) aufweisen -> filtert schwache/zufaellige Structure-Breaks heraus."""
+    ATR) aufweisen -> filtert schwache/zufaellige Structure-Breaks heraus.
+
+    Performance: `pool` (High- oder Low-Mikro-Swings) ist nach pos/confirmed_pos
+    sortiert -> die relevanten Kandidaten (pos > sweep_pos, confirmed_pos <= end)
+    werden per bisect als zusammenhaengender Slice gefunden, statt bei jedem
+    Sweep die komplette Mikro-Swing-Historie zu durchsuchen.
+    """
     end = min(sweep_pos + choch_window, n - 1)
     best = None
-    if direction == "bullish":
-        cands = [s for s in micro_swings if s["type"] == "high" and s["pos"] > sweep_pos
-                  and s["confirmed_pos"] <= end]
-    else:
-        cands = [s for s in micro_swings if s["type"] == "low" and s["pos"] > sweep_pos
-                  and s["confirmed_pos"] <= end]
+    pool = micro_by_type["high"] if direction == "bullish" else micro_by_type["low"]
+    lo = bisect.bisect_right(pool["pos"], sweep_pos)
+    hi = bisect.bisect_right(pool["conf"], end)
+    cands = pool["items"][lo:hi]
     for s in cands:
         start = s["confirmed_pos"] + 1
         if start > end:
@@ -161,9 +186,8 @@ def _simulate_trade(df, entry_pos, entry_price, sl, tp, direction, max_hold, spr
 
 
 def run_strategy(df: pd.DataFrame, pre: dict, params: dict, pip_size: float, spread: float):
-    swings = pre["swings"]
-    micro_swings = pre["micro_swings"]
-    confirmed_pos_arr = pre["confirmed_pos_arr"]
+    swings_by_type = pre["swings_by_type"]
+    micro_by_type = pre["micro_by_type"]
     asia_levels = pre["asia_levels"]
     bias_map = pre["bias_map"]
     trend_strength_map = pre["trend_strength_map"]
@@ -184,43 +208,51 @@ def run_strategy(df: pd.DataFrame, pre: dict, params: dict, pip_size: float, spr
     low = df["low"].values
     high = df["high"].values
     close = df["close"].values
-    idx = df.index
+    hours = pre["hours"]
+    dates = pre["dates"]
+    idx = df.index  # nur fuer den (seltenen) Asia-ready_at-Vergleich unten benoetigt
     n = len(df)
+
+    high_conf, high_items = swings_by_type["high"]["conf"], swings_by_type["high"]["items"]
+    low_conf, low_items = swings_by_type["low"]["conf"], swings_by_type["low"]["items"]
 
     trades = []
     i = 0
     swept_today = set()
     current_day = None
-    cache_count = -1
+    cache_key = (-1, -1)
     cache = None  # (last_high, last_low, eq_highs, eq_lows)
 
     while i < n:
-        ts = idx[i]
-        day = ts.date()
+        day = dates[i]
         if day != current_day:
             current_day = day
             swept_today = set()
 
         bias = bias_map.get(day, "neutral")
-        hour = ts.hour
+        hour = hours[i]
         in_kz = any(a <= hour < b for a, b in killzones)
         trend_ok = trend_strength_map.get(day, 0.0) >= trend_strength_mult
 
         if bias != "neutral" and in_kz and trend_ok:
-            n_confirmed = bisect.bisect_right(confirmed_pos_arr, i)
-            if n_confirmed != cache_count:
-                recent = swings[:n_confirmed]
-                last_high = next((s for s in reversed(recent) if s["type"] == "high"), None)
-                last_low = next((s for s in reversed(recent) if s["type"] == "low"), None)
-                eq_highs = cluster_equal_levels(recent, "high", eq_tol, eq_lookback)
-                eq_lows = cluster_equal_levels(recent, "low", eq_tol, eq_lookback)
+            # Nur die letzten `eq_lookback` bestaetigten Swings je Typ werden
+            # betrachtet (per bisect statt eines Scans ueber die komplette,
+            # bei mehreren Handelsmonaten sehr langen Swing-Historie).
+            n_high = bisect.bisect_right(high_conf, i)
+            n_low = bisect.bisect_right(low_conf, i)
+            key = (n_high, n_low)
+            if key != cache_key:
+                last_high = high_items[n_high - 1] if n_high > 0 else None
+                last_low = low_items[n_low - 1] if n_low > 0 else None
+                eq_highs = cluster_equal_levels(high_items[max(0, n_high - eq_lookback):n_high], eq_tol)
+                eq_lows = cluster_equal_levels(low_items[max(0, n_low - eq_lookback):n_low], eq_tol)
                 cache = (last_high, last_low, eq_highs, eq_lows)
-                cache_count = n_confirmed
+                cache_key = key
             last_high, last_low, eq_highs, eq_lows = cache
 
             candidates = []
             a = asia_levels.get(day)
-            if a is not None and ts >= a["ready_at"]:
+            if a is not None and idx[i] >= a["ready_at"]:
                 candidates.append((a["high"], "high", f"asia_high_{day}"))
                 candidates.append((a["low"], "low", f"asia_low_{day}"))
             if last_high:
@@ -259,7 +291,7 @@ def run_strategy(df: pd.DataFrame, pre: dict, params: dict, pip_size: float, spr
             if sweep:
                 level_price, lid, direction, wick_extreme = sweep
                 swept_today.add(lid)
-                choch = _find_choch(close, body, atr_m5, micro_swings, i, direction,
+                choch = _find_choch(close, body, atr_m5, micro_by_type, i, direction,
                                       params["choch_window"], displacement_mult, n)
                 if choch:
                     confirm_pos, choch_level, _ = choch

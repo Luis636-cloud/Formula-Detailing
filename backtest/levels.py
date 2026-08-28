@@ -45,15 +45,21 @@ def asia_session_levels(df: pd.DataFrame, start_hour: int = 0, end_hour: int = 6
     return out
 
 
-def cluster_equal_levels(swings, kind: str, tolerance: float, lookback_n: int = 40):
-    """Gruppiert die letzten `lookback_n` bestaetigten Swings eines Typs zu
-    Equal-High/Low Clustern (>=2 Beruehrungen innerhalb `tolerance`).
+def cluster_equal_levels(pts, tolerance: float):
+    """Gruppiert die uebergebenen Swings (bereits auf einen Typ gefiltert
+    und auf die letzten `lookback_n` Stueck begrenzt -- siehe strategy.py)
+    zu Equal-High/Low Clustern (>=2 Beruehrungen innerhalb `tolerance`).
 
     Gibt Liste von Levels [(price, confirmed_pos)] zurueck, wobei
     confirmed_pos = Bestaetigungsindex des zuletzt zum Cluster
     hinzugekommenen Swings (ab dann im Backtest verwendbar).
+
+    Performance-Hinweis: der Aufrufer ist dafuer verantwortlich, `pts`
+    bereits klein zu halten (z.B. per bisect auf eine nach Typ getrennte,
+    nach confirmed_pos sortierte Liste) -- ein Filtern/Slicen der
+    kompletten Swing-Historie bei jedem Aufruf waere O(n) pro Bar und
+    summiert sich bei zehntausenden Bars/Swings schnell zu Minuten.
     """
-    pts = [s for s in swings if s["type"] == kind][-lookback_n:]
     pts = sorted(pts, key=lambda s: s["price"])
     clusters = []
     used = [False] * len(pts)
