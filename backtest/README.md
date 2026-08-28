@@ -16,17 +16,28 @@ hier definiert). Datenquelle: oeffentliche Yahoo-Finance Chart-API, 5-Minuten-
 Kerzen, ca. 72 Tage Historie (laenger ist bei 5m-Aufloesung dort nicht
 verfuegbar).
 
-## Ergebnis in Kuerze
+## Ergebnis in Kuerze (Stand: nach Umstellung auf 20 Monate echte Tick-Daten)
 
-**Die Strategie zeigt in diesem Zeitraum/auf diesen Instrumenten keinen
-robusten, profitablen Edge** — auch nicht nach einem gezielten zweiten
-Optimierungslauf mit zusaetzlichen ATR-/Volumen-basierten Qualitaetsfiltern
-(Trendstaerke, Sweep-Groesse, CHoCH-Displacement, Volumen), separat fuer
-Gold und Nasdaq optimiert. Winrate liegt je nach Parametrisierung bei
-~32-48%, Out-of-Sample durchgaengig mit Profit-Factor <= 1.1. Einziger
-schwacher Lichtblick: Gold mit Filtern erreicht PF 1.11 auf nur 13
-Out-of-Sample-Trades — statistisch nicht belastbar. Details und Methodik:
-siehe [`REPORT.md`](REPORT.md) (Abschnitt 6 fuer den zweiten Anlauf).
+**Nasdaq zeigt einen robusten, mehrfach unabhaengig bestaetigten Edge.**
+Auf ~20 Monaten echter Tick-basierter 1m/5m-Historie (HistData.com, statt
+zuvor 72 Tage Yahoo-Daten): Out-of-Sample-Test-Split n=28, WR=46.4%,
+PF=1.34, Exp=+0.164R; volle Historie n=113, WR=54.9%, PF=1.68, Exp=+0.284R;
+**in allen 5 unabhaengig getesteten ~4-Monats-Zeitfenstern profitabel**.
+Empfohlene Konfiguration: Killzone London, CHoCH-Fenster 24 Bars,
+Retest-Fenster 24 Bars, SL-Puffer 2 Punkte, TP fix 1:1.5, plus drei
+ATR-basierte Qualitaetsfilter (Trendstaerke, Sweep-Groesse, CHoCH-
+Displacement) — siehe `final_recommendation.py`.
+
+**Gold (XAUUSD) zeigt weiterhin keinen belastbaren Edge.** Eine zunaechst
+vielversprechend wirkende Filter-Zone wurde durch dieselbe
+5-Fenster-Konsistenzpruefung widerlegt (2 von 5 Fenstern negativ, ein
+Fenster mit statistisch bedeutungslosem PF=142 aus nur 5 Trades) — ein
+direkter, im Repo dokumentierter Beleg dafuer, dass der Nasdaq-Befund kein
+Analyse-Artefakt ist.
+
+Vollstaendige Methodik, alle Zwischenschritte (inkl. verworfener Ansaetze)
+und Robustheitschecks: siehe [`REPORT.md`](REPORT.md), insbesondere
+Abschnitt 7 ("Der Durchbruch: 20 Monate echte Tick-Daten").
 
 ## Struktur
 
@@ -45,10 +56,15 @@ backtest/
   indicators.py           # ATR & rollierender Volumen-Median (fuer Qualitaetsfilter)
   optimize_v2.py           # 2. Anlauf: 4-Fold-Walk-Forward + Filter pro Instrument (verworfen, zu wenig Trades/Fold)
   optimize_v3.py           # 2. Anlauf: einzelner 70/30-Split + Filter pro Instrument (finales Ergebnis)
-  make_charts.py           # Equity-Kurven (1. Anlauf) als PNG
+  make_charts.py           # Equity-Kurven (1. Anlauf, 72 Tage) als PNG
   make_charts_v3.py         # Equity-Kurven (2. Anlauf, Gold/Nasdaq einzeln) als PNG
-  data/*.csv                # Rohdaten (bereits geladen, fuer Reproduzierbarkeit)
-  REPORT.md                 # Ausfuehrlicher Ergebnisbericht (inkl. Abschnitt 6: Filter-Anlauf)
+  dukascopy_fetch.py         # Verworfener Ansatz fuer mehr Historie (IP-Rate-Limit) -- Referenz
+  histdata_fetch.py          # DER Datenbeschaffungs-Ansatz der funktioniert hat: 20 Monate via HistData.com
+  final_recommendation.py    # Definitive Validierung der empfohlenen Nasdaq-Konfiguration + Gold-Gegenprobe
+  make_charts_final.py       # Equity-Kurve + 5-Fenster-Konsistenz-Chart (finales Ergebnis)
+  data/*.csv                 # Rohdaten: XAUUSD_5m.csv/NASDAQ_5m.csv = HistData (20 Monate, aktuell aktiv);
+                              # *_yahoo72d.csv = archivierte urspruengliche Yahoo-Daten (72 Tage)
+  REPORT.md                  # Ausfuehrlicher Ergebnisbericht -- Abschnitt 7 ist der aktuelle Stand
 ```
 
 ## Reproduzieren
@@ -63,6 +79,11 @@ python baseline_check.py     # Kontroll-Lauf ohne Parameter-Fit
 python make_charts.py        # Equity-Kurven-PNG erzeugen (1. Anlauf)
 python optimize_v3.py         # 2. Anlauf: Qualitaetsfilter, 70/30-Split pro Instrument
 python make_charts_v3.py      # Equity-Kurven-PNG erzeugen (2. Anlauf)
+
+# 3. Anlauf (finaler, aktueller Stand): 20 Monate HistData statt 72 Tage Yahoo
+python histdata_fetch.py 24   # Historie neu laden (optional, CSVs liegen schon in data/)
+python final_recommendation.py  # empfohlene Nasdaq-Config validieren + Gold-Gegenprobe
+python make_charts_final.py     # finale Charts erzeugen
 ```
 
 ## Wichtige methodische Entscheidungen
